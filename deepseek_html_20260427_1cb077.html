@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Магазин</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; padding: 15px; }
+        .header { display: flex; justify-content: space-between; align-items: center; background: white; padding: 15px; border-radius: 15px; margin-bottom: 15px; }
+        h1 { color: #7c3aed; font-size: 22px; }
+        .cart-btn { background: #7c3aed; color: white; padding: 8px 15px; border-radius: 25px; cursor: pointer; }
+        .search input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 25px; margin-bottom: 15px; }
+        .categories { display: flex; gap: 10px; margin-bottom: 15px; overflow-x: auto; }
+        .cat-btn { padding: 8px 20px; background: white; border: 1px solid #ddd; border-radius: 25px; cursor: pointer; white-space: nowrap; }
+        .cat-btn.active { background: #7c3aed; color: white; }
+        .product { background: white; border-radius: 15px; margin-bottom: 15px; overflow: hidden; display: flex; }
+        .product-img { width: 100px; height: 100px; object-fit: cover; }
+        .product-info { flex: 1; padding: 12px; }
+        .product-name { font-weight: bold; font-size: 16px; }
+        .product-price { color: #7c3aed; font-weight: bold; margin: 5px 0; }
+        .product-desc { font-size: 12px; color: #666; }
+        .buy-btn { background: #7c3aed; color: white; border: none; padding: 8px 15px; border-radius: 10px; margin-top: 8px; cursor: pointer; width: 100%; }
+        .cart-modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; }
+        .cart-modal.show { display: flex; align-items: center; justify-content: center; }
+        .cart-content { background: white; width: 90%; max-width: 400px; padding: 20px; border-radius: 20px; max-height: 80%; overflow-y: auto; }
+        .cart-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ddd; }
+        .total { font-size: 18px; font-weight: bold; margin: 15px 0; text-align: right; }
+        button { background: #7c3aed; color: white; border: none; padding: 10px; border-radius: 10px; cursor: pointer; margin: 5px; }
+        .notif { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #10b981; color: white; padding: 10px 20px; border-radius: 30px; z-index: 2000; }
+    </style>
+</head>
+<body>
+<div class="header">
+    <h1>💨 VAPE SHOP</h1>
+    <div class="cart-btn" onclick="toggleCart()">🛒 <span id="cartCount">0</span></div>
+</div>
+<div class="search"><input type="text" id="search" placeholder="🔍 Поиск..."></div>
+<div class="categories" id="categories"></div>
+<div id="products"></div>
+
+<div class="cart-modal" id="cartModal">
+    <div class="cart-content">
+        <h2>🛒 Корзина</h2>
+        <div id="cartItems"></div>
+        <div class="total">Итого: $<span id="cartTotal">0</span></div>
+        <button onclick="checkout()">✅ Оформить заказ</button>
+        <button onclick="toggleCart()">❌ Закрыть</button>
+    </div>
+</div>
+
+<script>
+const WebApp = window.Telegram.WebApp;
+WebApp.ready();
+WebApp.expand();
+
+let products = { pods: [], liquids: [] };
+let cart = [];
+let currentCat = 'all';
+
+async function loadProducts() {
+    const res = await fetch('/api/products');
+    products = await res.json();
+    showCategories();
+    showProducts();
+}
+
+function showCategories() {
+    const cats = ['all', ...Object.keys(products)];
+    const names = { all: 'Все', pods: '💨 POD', liquids: '🧪 Жидкости' };
+    document.getElementById('categories').innerHTML = cats.map(c => 
+        `<button class="cat-btn ${currentCat === c ? 'active' : ''}" onclick="setCat('${c}')">${names[c] || c}</button>`
+    ).join('');
+}
+
+function setCat(cat) { currentCat = cat; showCategories(); showProducts(); }
+
+function showProducts() {
+    let items = currentCat === 'all' ? [...products.pods, ...products.liquids] : products[currentCat];
+    const search = document.getElementById('search').value.toLowerCase();
+    items = items.filter(p => p.name.toLowerCase().includes(search));
+    
+    document.getElementById('products').innerHTML = items.map(p => `
+        <div class="product">
+            <img class="product-img" src="${p.image}" onerror="this.src='https://placehold.co/100'">
+            <div class="product-info">
+                <div class="product-name">${p.name}</div>
+                <div class="product-price">$${p.price}</div>
+                <div class="product-desc">${p.description}</div>
+                <button class="buy-btn" onclick="addToCart(${p.id})">➕ В корзину</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+document.getElementById('search').addEventListener('input', () => showProducts());
+
+function addToCart(id) {
+    const all = [...products.pods, ...products.liquids];
+    const p = all.find(p => p.id === id);
+    const exist = cart.find(i => i.id === id);
+    if (exist) exist.quantity++;
+    else cart.push({ id: p.id, name: p.name, price: p.price, quantity: 1 });
+    updateCart();
+    showNotif(`${p.name} добавлен!`);
+}
+
+function updateCart() {
+    const count = cart.reduce((s, i) => s + i.quantity, 0);
+    document.getElementById('cartCount').innerText = count;
+    const total = cart.reduce((s, i) => s + i.price * i.quantity, 0);
+    document.getElementById('cartTotal').innerText = total;
+    
+    const container = document.getElementById('cartItems');
+    if (cart.length === 0) container.innerHTML = '<p>Корзина пуста</p>';
+    else {
+        container.innerHTML = cart.map(i => `
+            <div class="cart-item">
+                <div><b>${i.name}</b><br>$${i.price} × ${i.quantity} = $${i.price * i.quantity}</div>
+                <div>
+                    <button onclick="changeQty(${i.id}, -1)">-</button>
+                    <button onclick="changeQty(${i.id}, 1)">+</button>
+                    <button onclick="removeItem(${i.id})">🗑️</button>
+                </div>
+            </div>
+        `).join('');
+    }
+    localStorage.setItem('cart', JSON.stringify(cart));
+}
+
+function changeQty(id, delta) {
+    const i = cart.find(i => i.id === id);
+    if (i) { i.quantity += delta; if (i.quantity <= 0) cart = cart.filter(x => x.id !== id); updateCart(); }
+}
+function removeItem(id) { cart = cart.filter(i => i.id !== id); updateCart(); }
+function toggleCart() { document.getElementById('cartModal').classList.toggle('show'); }
+function checkout() {
+    if (cart.length === 0) { showNotif('Корзина пуста!'); return; }
+    const total = cart.reduce((s, i) => s + i.price * i.quantity, 0);
+    WebApp.sendData(JSON.stringify({ action: 'checkout', cart: cart, total: total }));
+    WebApp.close();
+}
+function showNotif(msg) {
+    const d = document.createElement('div'); d.className = 'notif'; d.innerText = msg;
+    document.body.appendChild(d);
+    setTimeout(() => d.remove(), 2000);
+}
+const saved = localStorage.getItem('cart');
+if (saved) { cart = JSON.parse(saved); updateCart(); }
+loadProducts();
+</script>
+</body>
+</html>
